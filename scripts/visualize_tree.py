@@ -14,7 +14,7 @@ def visualize_baseline_tree() -> None:
     y_pred = model.predict(X_test)
     conf_matrix = confusion_matrix(y_test, y_pred)
 
-    fig, axes = plt.subplots(1, 2, figsize=(24, 8))
+    fig, axes = plt.subplots(2, 1, figsize=(24, 12), gridspec_kw={"height_ratios": [1, 1]})
 
     ConfusionMatrixDisplay(
         confusion_matrix=conf_matrix,
