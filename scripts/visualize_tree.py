@@ -188,7 +188,6 @@ class TreeExplorerApp:
         self.algo_buttons: list[tk.Button] = []
         self.detail_vars: dict[str, tk.StringVar] = {}
         self.metric_vars: dict[str, tk.StringVar] = {}
-        self.cm_var = tk.StringVar(value="-")
 
         self._build_ui()
         self._switch_scenario(0)
@@ -332,9 +331,9 @@ class TreeExplorerApp:
         m_f3 = tk.Frame(metrics_container, bg="#f9f9f9")
         m_f3.grid(row=0, column=2, sticky="ew", padx=2)
         
-        self.metric_vars["test_acc"] = self._metric_card(m_f1, "Test Acc", pad_y=0)
-        self.metric_vars["error_rate"] = self._metric_card(m_f2, "Error Rate", pad_y=0)
-        self.metric_vars["roc_auc"] = self._metric_card(m_f3, "ROC-AUC", pad_y=0)
+        self.metric_vars["train_acc"] = self._metric_card(m_f1, "Train Acc", pad_y=0)
+        self.metric_vars["test_acc"] = self._metric_card(m_f2, "Test Acc", pad_y=0)
+        self.metric_vars["error_rate"] = self._metric_card(m_f3, "Error Rate", pad_y=0)
 
         m_f4 = tk.Frame(metrics_container, bg="#f9f9f9")
         m_f4.grid(row=1, column=0, sticky="ew", padx=2)
@@ -343,48 +342,123 @@ class TreeExplorerApp:
         m_f6 = tk.Frame(metrics_container, bg="#f9f9f9")
         m_f6.grid(row=1, column=2, sticky="ew", padx=2)
 
-        self.metric_vars["precision"] = self._metric_card(m_f4, "Precision", pad_y=0)
-        self.metric_vars["recall"] = self._metric_card(m_f5, "Recall", pad_y=0)
-        self.metric_vars["f1_score"] = self._metric_card(m_f6, "F1-score", pad_y=0)
+        self.metric_vars["roc_auc"] = self._metric_card(m_f4, "ROC-AUC", pad_y=0)
+        self.metric_vars["precision"] = self._metric_card(m_f5, "Precision", pad_y=0)
+        self.metric_vars["recall"] = self._metric_card(m_f6, "Recall", pad_y=0)
 
-        cm_row = tk.Frame(scrollable_right, bg="#f9f9f9")
-        cm_row.pack(fill="x", padx=10, pady=(2, 8))
-        tk.Label(cm_row, text="Confusion Matrix:", font=("Segoe UI", 10), bg="#f9f9f9", fg="#666").pack(side="left")
-        tk.Label(cm_row, textvariable=self.cm_var, font=("Segoe UI", 10, "bold"), bg="#f9f9f9", fg="#333").pack(side="left", padx=5)
+        m_f7 = tk.Frame(metrics_container, bg="#f9f9f9")
+        m_f7.grid(row=2, column=0, sticky="ew", padx=2)
+        
+        self.metric_vars["f1_score"] = self._metric_card(m_f7, "F1-score", pad_y=0)
 
-        # Tree analysis
-        tk.Label(scrollable_right, text="Tree Analysis", font=("Segoe UI", 14, "bold"), bg="#f9f9f9").pack(anchor="w", padx=10, pady=(10, 2))
-        sys_f_lbl = tk.Label(scrollable_right, text="Top Important Features:", font=("Segoe UI", 10, "bold"), bg="#f9f9f9", fg="#444")
-        sys_f_lbl.pack(anchor="w", padx=10)
-        
-        self.analysis_feats_var = tk.StringVar(value="")
-        tk.Label(scrollable_right, textvariable=self.analysis_feats_var, font=("Consolas", 9), justify="left", bg="#f9f9f9", fg="#222").pack(anchor="w", padx=20)
-        
-        sys_r_lbl = tk.Label(scrollable_right, text="Typical decision rules (depth 2):", font=("Segoe UI", 10, "bold"), bg="#f9f9f9", fg="#444")
-        sys_r_lbl.pack(anchor="w", padx=10, pady=(5,0))
-        
-        self.analysis_rules_var = tk.StringVar(value="")
-        tk.Label(scrollable_right, textvariable=self.analysis_rules_var, font=("Consolas", 8), justify="left", bg="#eaeaea", fg="#111", padx=5, pady=5).pack(anchor="w", padx=10, fill="x")
+        # ── Confusion Matrix as a readable 2×2 table ──────────────────────────
+        sep1 = tk.Frame(scrollable_right, bg="#ddd", height=1)
+        sep1.pack(fill="x", padx=10, pady=(4, 6))
 
-        tk.Label(scrollable_right, text="Node detail", font=("Segoe UI", 14, "bold"), bg="#f9f9f9").pack(anchor="w", padx=10, pady=(15, 8))
+        tk.Label(
+            scrollable_right,
+            text="Ma trận nhầm lẫn  (Confusion Matrix)",
+            font=("Segoe UI", 11, "bold"),
+            bg="#f9f9f9",
+            fg="#333",
+        ).pack(anchor="w", padx=10)
+        tk.Label(
+            scrollable_right,
+            text="Mỗi ô cho biết mô hình dự đoán đúng/sai bao nhiêu khách hàng.",
+            font=("Segoe UI", 9),
+            bg="#f9f9f9",
+            fg="#888",
+            wraplength=320,
+            justify="left",
+        ).pack(anchor="w", padx=10, pady=(0, 4))
+
+        self.cm_frame = tk.Frame(scrollable_right, bg="#f9f9f9")
+        self.cm_frame.pack(fill="x", padx=10, pady=(0, 8))
+
+        # ── Tree Analysis ──────────────────────────────────────────────────────
+        sep2 = tk.Frame(scrollable_right, bg="#ddd", height=1)
+        sep2.pack(fill="x", padx=10, pady=(4, 6))
+
+        tk.Label(
+            scrollable_right,
+            text="Phân tích cây quyết định",
+            font=("Segoe UI", 13, "bold"),
+            bg="#f9f9f9",
+        ).pack(anchor="w", padx=10, pady=(0, 2))
+
+        # ── Feature importance bars ────────────────────────────────────────────
+        tk.Label(
+            scrollable_right,
+            text="🔑  Đặc trưng quan trọng nhất",
+            font=("Segoe UI", 10, "bold"),
+            bg="#f9f9f9",
+            fg="#333",
+        ).pack(anchor="w", padx=10, pady=(4, 0))
+        tk.Label(
+            scrollable_right,
+            text="Thanh càng dài → đặc trưng ảnh hưởng càng lớn đến dự đoán.",
+            font=("Segoe UI", 9),
+            bg="#f9f9f9",
+            fg="#888",
+            wraplength=320,
+            justify="left",
+        ).pack(anchor="w", padx=10, pady=(0, 4))
+
+        self.feat_bar_frame = tk.Frame(scrollable_right, bg="#f9f9f9")
+        self.feat_bar_frame.pack(fill="x", padx=10, pady=(0, 6))
+
+        # ── Readable IF-THEN rules ─────────────────────────────────────────────
+        tk.Label(
+            scrollable_right,
+            text="📋  Quy tắc quyết định (dễ đọc)",
+            font=("Segoe UI", 10, "bold"),
+            bg="#f9f9f9",
+            fg="#333",
+        ).pack(anchor="w", padx=10, pady=(6, 0))
+        tk.Label(
+            scrollable_right,
+            text="Các con đường mô hình đi qua để đưa ra dự đoán.",
+            font=("Segoe UI", 9),
+            bg="#f9f9f9",
+            fg="#888",
+            wraplength=320,
+            justify="left",
+        ).pack(anchor="w", padx=10, pady=(0, 4))
+
+        self.rules_frame = tk.Frame(scrollable_right, bg="#f9f9f9")
+        self.rules_frame.pack(fill="x", padx=10, pady=(0, 8))
+
+        # ── Node detail ────────────────────────────────────────────────────────
+        sep3 = tk.Frame(scrollable_right, bg="#ddd", height=1)
+        sep3.pack(fill="x", padx=10, pady=(4, 6))
+
+        tk.Label(
+            scrollable_right,
+            text="Chi tiết nút được chọn",
+            font=("Segoe UI", 13, "bold"),
+            bg="#f9f9f9",
+        ).pack(anchor="w", padx=10, pady=(0, 4))
 
         detail_fields = [
-            ("split", "Split"),
-            ("samples", "Samples"),
-            ("gini", "Gini"),
-            ("class", "Class"),
-            ("churn_pct", "Churn %"),
-            ("threshold", "Threshold"),
-            ("value", "Value [No churn, Churn]"),
+            ("split",    "Điều kiện tách",       "Điều kiện mà nút này kiểm tra"),
+            ("samples",  "Số mẫu",               "Bao nhiêu khách hàng đi qua nút này"),
+            ("gini",     "Gini (độ hỗn loạn)",   "0 = thuần khiết, 0.5 = lẫn lộn nhất"),
+            ("class",    "Dự đoán",              "Nhãn mà nút này dự đoán"),
+            ("churn_pct","% Churn",               "Tỉ lệ khách hàng rời bỏ trong nút này"),
+            ("threshold","Ngưỡng phân tách",      "Giá trị ngưỡng của điều kiện"),
+            ("value",    "Phân bố [Ở lại, Rời]", "Số mẫu theo từng nhãn"),
         ]
 
-        for key, title in detail_fields:
+        for key, title, hint in detail_fields:
             var = tk.StringVar(value="-")
             self.detail_vars[key] = var
             row = tk.Frame(scrollable_right, bg="#f9f9f9")
             row.pack(fill="x", padx=10, pady=2)
-            tk.Label(row, text=title, font=("Segoe UI", 11), bg="#f9f9f9", fg="#555").pack(side="left")
-            tk.Label(row, textvariable=var, font=("Segoe UI", 11, "bold"), bg="#f9f9f9", fg="#222").pack(side="right")
+            lbl_frame = tk.Frame(row, bg="#f9f9f9")
+            lbl_frame.pack(side="left")
+            tk.Label(lbl_frame, text=title, font=("Segoe UI", 10, "bold"), bg="#f9f9f9", fg="#444").pack(anchor="w")
+            tk.Label(lbl_frame, text=hint, font=("Segoe UI", 8), bg="#f9f9f9", fg="#aaa").pack(anchor="w")
+            tk.Label(row, textvariable=var, font=("Segoe UI", 11, "bold"), bg="#f9f9f9", fg="#1a5fb4").pack(side="right", anchor="n", pady=4)
 
     def _legend_item(self, parent: tk.Widget, color: str, text: str) -> tk.Frame:
         container = tk.Frame(parent, bg="#f9f9f9")
@@ -418,6 +492,7 @@ class TreeExplorerApp:
             text=f"depth: {scenario.summary['depth']} - nodes: {scenario.summary['nodes']} - leaves: {scenario.summary['leaves']}"
         )
 
+        self.metric_vars["train_acc"].set(f"{scenario.metrics['train_acc'] * 100:.1f}%")
         self.metric_vars["test_acc"].set(f"{scenario.metrics['test_acc'] * 100:.1f}%")
         self.metric_vars["error_rate"].set(f"{scenario.metrics['error_rate'] * 100:.1f}%")
         self.metric_vars["recall"].set(f"{scenario.metrics['recall'] * 100:.1f}%")
@@ -425,16 +500,60 @@ class TreeExplorerApp:
         self.metric_vars["precision"].set(f"{scenario.metrics['precision'] * 100:.1f}%")
         self.metric_vars["roc_auc"].set(f"{scenario.metrics['roc_auc']:.2f}")
         
+        # ── Confusion Matrix 2x2 table ─────────────────────────────────────────
+        for w in self.cm_frame.winfo_children():
+            w.destroy()
         cm = scenario.metrics["confusion_matrix"]
-        self.cm_var.set(f"[[{cm[0][0]}, {cm[0][1]}], [{cm[1][0]}, {cm[1][1]}]]")
-        
-        feats_text = "\n".join([f"{i+1}. {f[0]} - importance: {f[1]:.3f}" for i, f in enumerate(scenario.top_features)])
-        self.analysis_feats_var.set(feats_text)
-        
-        rules_text = "\n".join(scenario.rules.split("\n")[:12]) + "..."
-        if not rules_text.strip():
-            rules_text = "No prominent rules at depth 2"
-        self.analysis_rules_var.set(rules_text)
+        tn, fp, fn, tp = cm[0][0], cm[0][1], cm[1][0], cm[1][1]
+        _cm_data = [
+            ("",              "Dự đoán: Ở lại", "Dự đoán: Rời"),
+            ("Thực: Ở lại",   f"✅ {tn}",        f"❌ {fp}"),
+            ("Thực: Rời",     f"❌ {fn}",        f"✅ {tp}"),
+        ]
+        _cm_colors = [
+            ("#e8e8e8", "#e8e8e8", "#e8e8e8"),
+            ("#e8e8e8", "#d7f0dc", "#fde8e8"),
+            ("#e8e8e8", "#fde8e8", "#d7f0dc"),
+        ]
+        for r, row_data in enumerate(_cm_data):
+            for c, cell in enumerate(row_data):
+                bg = _cm_colors[r][c]
+                bold = "bold" if r == 0 or c == 0 else ""
+                tk.Label(
+                    self.cm_frame,
+                    text=cell,
+                    font=("Segoe UI", 9, bold),
+                    bg=bg,
+                    fg="#222",
+                    relief="solid",
+                    bd=1,
+                    padx=6,
+                    pady=4,
+                    width=14,
+                ).grid(row=r, column=c, padx=1, pady=1, sticky="nsew")
+
+        # ── Feature importance bars ────────────────────────────────────────────
+        for w in self.feat_bar_frame.winfo_children():
+            w.destroy()
+        bar_max = scenario.top_features[0][1] if scenario.top_features else 1.0
+        bar_max = bar_max if bar_max > 0 else 1.0
+        _bar_colors = ["#1a5fb4", "#3584e4", "#62a0ea"]
+        for i, (fname, fval) in enumerate(scenario.top_features):
+            row_f = tk.Frame(self.feat_bar_frame, bg="#f9f9f9")
+            row_f.pack(fill="x", pady=2)
+            tk.Label(row_f, text=f"{i+1}. {fname}", font=("Segoe UI", 9), bg="#f9f9f9", fg="#222", width=22, anchor="w").pack(side="left")
+            bar_bg = tk.Frame(row_f, bg="#e0e0e0", height=14, width=120)
+            bar_bg.pack(side="left", padx=4)
+            bar_bg.pack_propagate(False)
+            fill_w = max(4, int(120 * fval / bar_max))
+            bar_fill = tk.Frame(bar_bg, bg=_bar_colors[i % len(_bar_colors)], height=14, width=fill_w)
+            bar_fill.place(x=0, y=0, height=14, width=fill_w)
+            tk.Label(row_f, text=f"{fval:.3f}", font=("Segoe UI", 9, "bold"), bg="#f9f9f9", fg="#444").pack(side="left")
+
+        # ── Readable IF-THEN rules ─────────────────────────────────────────────
+        for w in self.rules_frame.winfo_children():
+            w.destroy()
+        self._render_readable_rules(scenario)
 
         gap = scenario.metrics["train_acc"] - scenario.metrics["test_acc"]
         if gap > 0.08:
@@ -445,6 +564,50 @@ class TreeExplorerApp:
         self._reset_visible_tree()
         self._show_node_details(0)
         self._draw_tree_graph()
+
+    def _render_readable_rules(self, scenario: "ScenarioData") -> None:
+        """Parse the sklearn export_text output and render as IF-THEN cards."""
+        lines = [l for l in scenario.rules.split("\n") if l.strip()]
+        conditions: list[str] = []
+        rule_cards: list[tuple[list[str], str]] = []  # (conditions, leaf_label)
+
+        for line in lines:
+            stripped = line.lstrip("|").strip()
+            indent = (len(line) - len(line.lstrip("|"))) // 4
+
+            if stripped.startswith("--- "):
+                cond = stripped[4:]
+                if indent < len(conditions):
+                    conditions = conditions[:indent]
+                conditions.append(cond)
+            elif stripped.startswith("class:"):
+                label = stripped.replace("class:", "").strip()
+                if rule_cards.__len__() < 4:
+                    rule_cards.append((list(conditions), label))
+
+        _card_colors = {
+            "1": ("#fff3e0", "#d84315", "🔴  DỰ ĐOÁN: RỜI BỎ"),
+            "0": ("#e8f5e9", "#2e7d32", "🟢  DỰ ĐOÁN: Ở LẠI"),
+        }
+        if not rule_cards:
+            tk.Label(self.rules_frame, text="Không có quy tắc.", font=("Segoe UI", 9), bg="#f9f9f9", fg="#888").pack()
+            return
+
+        for conds, label in rule_cards:
+            color_key = label.strip() if label.strip() in _card_colors else "0"
+            bg, fg, header = _card_colors[color_key]
+
+            card = tk.Frame(self.rules_frame, bg=bg, bd=1, relief="solid")
+            card.pack(fill="x", pady=3)
+
+            tk.Label(card, text=header, font=("Segoe UI", 9, "bold"), bg=bg, fg=fg).pack(anchor="w", padx=8, pady=(5, 2))
+
+            if conds:
+                tk.Label(card, text="NẾU:", font=("Segoe UI", 9, "bold"), bg=bg, fg="#555").pack(anchor="w", padx=8)
+                for i, c in enumerate(conds):
+                    prefix = "  └─" if i == len(conds) - 1 else "  ├─"
+                    tk.Label(card, text=f"{prefix} {c}", font=("Segoe UI", 9), bg=bg, fg="#333", justify="left", wraplength=290).pack(anchor="w", padx=8)
+            tk.Label(card, text="", bg=bg, height=1).pack()
 
     def _reset_visible_tree(self) -> None:
         self.visible_items.clear()
