@@ -14,10 +14,11 @@ def run_pipeline() -> None:
     clean_and_prepare_data()
     train_baseline_decision_tree()
     compute_baseline_metrics()
-    visualize_baseline_tree()
     analyze_baseline_tree()
-
+    
     print("\nFull baseline pipeline finished successfully.")
+    print("Starting visualizer...")
+    visualize_baseline_tree()
 
 
 if __name__ == "__main__":

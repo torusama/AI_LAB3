@@ -4,8 +4,8 @@ import tkinter as tk
 from dataclasses import dataclass
 from tkinter import ttk
 
-from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, roc_auc_score
-from sklearn.tree import DecisionTreeClassifier, _tree
+from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.tree import DecisionTreeClassifier, export_text, _tree
 
 from common import ensure_directories, get_default_model_path, load_model, load_splits
 
@@ -33,6 +33,8 @@ class ScenarioData:
     metrics: dict
     summary: dict
     node_details: dict[int, dict]
+    top_features: list[tuple[str, float]]
+    rules: str
 
 
 @dataclass
@@ -90,6 +92,12 @@ def _node_payload(clf: DecisionTreeClassifier, feature_names: list[str]) -> dict
         no_churn_count = float(counts[0]) if len(counts) > 0 else 0.0
         churn_count = float(counts[1]) if len(counts) > 1 else 0.0
         value_sum = no_churn_count + churn_count
+        
+        if value_sum > 0 and value_sum <= 1.01 and total_samples > 1:
+            no_churn_count = total_samples * (no_churn_count / value_sum)
+            churn_count = total_samples * (churn_count / value_sum)
+            value_sum = no_churn_count + churn_count
+
         churn_pct = (churn_count / value_sum * 100.0) if value_sum else 0.0
 
         if is_leaf:
@@ -129,9 +137,12 @@ def _scenario_payload(name: str, clf: DecisionTreeClassifier, X_train, y_train, 
     cm = confusion_matrix(y_test, y_test_pred)
 
     metrics = {
+        "error_rate": 1.0 - float(accuracy_score(y_test, y_test_pred)),
         "train_acc": float(accuracy_score(y_train, y_train_pred)),
         "test_acc": float(accuracy_score(y_test, y_test_pred)),
         "precision": float(precision_score(y_test, y_test_pred, zero_division=0)),
+        "recall": float(recall_score(y_test, y_test_pred, zero_division=0)),
+        "f1_score": float(f1_score(y_test, y_test_pred, zero_division=0)),
         "roc_auc": float(roc_auc_score(y_test, y_test_proba)),
         "confusion_matrix": [[int(cm[0][0]), int(cm[0][1])], [int(cm[1][0]), int(cm[1][1])]],
     }
@@ -141,6 +152,12 @@ def _scenario_payload(name: str, clf: DecisionTreeClassifier, X_train, y_train, 
         "nodes": int(clf.tree_.node_count),
         "leaves": int(clf.get_n_leaves()),
     }
+    
+    importances = clf.feature_importances_
+    features_scored = sorted(zip(X_train.columns, importances), key=lambda x: x[1], reverse=True)
+    top_features = [f for f in features_scored if f[1] > 0][:3]
+    
+    rules = export_text(clf, feature_names=list(X_train.columns), max_depth=2, show_weights=True)
 
     return ScenarioData(
         name=name,
@@ -149,6 +166,8 @@ def _scenario_payload(name: str, clf: DecisionTreeClassifier, X_train, y_train, 
         metrics=metrics,
         summary=summary,
         node_details=_node_payload(clf, list(X_train.columns)),
+        top_features=top_features,
+        rules=rules,
     )
 
 
@@ -157,6 +176,8 @@ class TreeExplorerApp:
         self.root = root
         self.scenarios = scenarios
         self.current_index = 0
+
+        self.scale_factor = 1.0
 
         self.visible_items: dict[str, VisibleItem] = {}
         self.visible_children: dict[str, list[str]] = {}
@@ -256,6 +277,12 @@ class TreeExplorerApp:
         self.canvas.configure(xscrollcommand=x_scroll.set, yscrollcommand=y_scroll.set)
         self.canvas.tag_bind("item", "<Button-1>", self._on_canvas_click)
 
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind("<Button-4>", self._on_mousewheel)
+        self.canvas.bind("<Button-5>", self._on_mousewheel)
+        self.canvas.bind("<ButtonPress-1>", self._on_pan_start)
+        self.canvas.bind("<B1-Motion>", self._on_pan_move)
+
         legend = tk.Frame(left_panel, bg="#f9f9f9")
         legend.grid(row=2, column=0, sticky="ew", padx=12, pady=(8, 12))
         self._legend_item(legend, CHURN_COLOR, "Churn node").pack(side="left", padx=(0, 12))
@@ -272,20 +299,74 @@ class TreeExplorerApp:
         right_panel = tk.Frame(body, bg="#f9f9f9", bd=1, relief="solid")
         right_panel.grid(row=0, column=1, sticky="nsew")
 
-        metrics_container = tk.Frame(right_panel, bg="#f9f9f9")
+        right_canvas = tk.Canvas(right_panel, bg="#f9f9f9", highlightthickness=0)
+        right_scroll = ttk.Scrollbar(right_panel, orient="vertical", command=right_canvas.yview)
+        scrollable_right = tk.Frame(right_canvas, bg="#f9f9f9")
+        
+        scrollable_right.bind(
+            "<Configure>",
+            lambda e: right_canvas.configure(scrollregion=right_canvas.bbox("all"))
+        )
+        right_canvas.create_window((0, 0), window=scrollable_right, anchor="nw")
+        right_canvas.configure(yscrollcommand=right_scroll.set)
+        
+        right_canvas.pack(side="left", fill="both", expand=True)
+        right_scroll.pack(side="right", fill="y")
+        
+        def _on_right_mousewheel(event):
+            if right_scroll.get() != (0.0, 1.0):
+                right_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        right_canvas.bind_all("<MouseWheel>", _on_right_mousewheel)
+
+        metrics_container = tk.Frame(scrollable_right, bg="#f9f9f9")
         metrics_container.pack(fill="x", padx=10, pady=10)
 
-        self.metric_vars["train_acc"] = self._metric_card(metrics_container, "Train acc")
-        self.metric_vars["test_acc"] = self._metric_card(metrics_container, "Test acc")
-        self.metric_vars["precision"] = self._metric_card(metrics_container, "Precision")
-        self.metric_vars["roc_auc"] = self._metric_card(metrics_container, "ROC-AUC")
+        # 3 columns for metrics to save space
+        for i in range(3):
+            metrics_container.grid_columnconfigure(i, weight=1)
 
-        cm_row = tk.Frame(right_panel, bg="#f9f9f9")
+        m_f1 = tk.Frame(metrics_container, bg="#f9f9f9")
+        m_f1.grid(row=0, column=0, sticky="ew", padx=2)
+        m_f2 = tk.Frame(metrics_container, bg="#f9f9f9")
+        m_f2.grid(row=0, column=1, sticky="ew", padx=2)
+        m_f3 = tk.Frame(metrics_container, bg="#f9f9f9")
+        m_f3.grid(row=0, column=2, sticky="ew", padx=2)
+        
+        self.metric_vars["test_acc"] = self._metric_card(m_f1, "Test Acc", pad_y=0)
+        self.metric_vars["error_rate"] = self._metric_card(m_f2, "Error Rate", pad_y=0)
+        self.metric_vars["roc_auc"] = self._metric_card(m_f3, "ROC-AUC", pad_y=0)
+
+        m_f4 = tk.Frame(metrics_container, bg="#f9f9f9")
+        m_f4.grid(row=1, column=0, sticky="ew", padx=2)
+        m_f5 = tk.Frame(metrics_container, bg="#f9f9f9")
+        m_f5.grid(row=1, column=1, sticky="ew", padx=2)
+        m_f6 = tk.Frame(metrics_container, bg="#f9f9f9")
+        m_f6.grid(row=1, column=2, sticky="ew", padx=2)
+
+        self.metric_vars["precision"] = self._metric_card(m_f4, "Precision", pad_y=0)
+        self.metric_vars["recall"] = self._metric_card(m_f5, "Recall", pad_y=0)
+        self.metric_vars["f1_score"] = self._metric_card(m_f6, "F1-score", pad_y=0)
+
+        cm_row = tk.Frame(scrollable_right, bg="#f9f9f9")
         cm_row.pack(fill="x", padx=10, pady=(2, 8))
-        tk.Label(cm_row, text="Confusion matrix", font=("Segoe UI", 10), bg="#f9f9f9", fg="#666").pack(side="left")
-        tk.Label(cm_row, textvariable=self.cm_var, font=("Segoe UI", 10, "bold"), bg="#f9f9f9", fg="#333").pack(side="right")
+        tk.Label(cm_row, text="Confusion Matrix:", font=("Segoe UI", 10), bg="#f9f9f9", fg="#666").pack(side="left")
+        tk.Label(cm_row, textvariable=self.cm_var, font=("Segoe UI", 10, "bold"), bg="#f9f9f9", fg="#333").pack(side="left", padx=5)
 
-        tk.Label(right_panel, text="Node detail", font=("Segoe UI", 14, "bold"), bg="#f9f9f9").pack(anchor="w", padx=10, pady=(4, 8))
+        # Tree analysis
+        tk.Label(scrollable_right, text="Tree Analysis", font=("Segoe UI", 14, "bold"), bg="#f9f9f9").pack(anchor="w", padx=10, pady=(10, 2))
+        sys_f_lbl = tk.Label(scrollable_right, text="Top Important Features:", font=("Segoe UI", 10, "bold"), bg="#f9f9f9", fg="#444")
+        sys_f_lbl.pack(anchor="w", padx=10)
+        
+        self.analysis_feats_var = tk.StringVar(value="")
+        tk.Label(scrollable_right, textvariable=self.analysis_feats_var, font=("Consolas", 9), justify="left", bg="#f9f9f9", fg="#222").pack(anchor="w", padx=20)
+        
+        sys_r_lbl = tk.Label(scrollable_right, text="Typical decision rules (depth 2):", font=("Segoe UI", 10, "bold"), bg="#f9f9f9", fg="#444")
+        sys_r_lbl.pack(anchor="w", padx=10, pady=(5,0))
+        
+        self.analysis_rules_var = tk.StringVar(value="")
+        tk.Label(scrollable_right, textvariable=self.analysis_rules_var, font=("Consolas", 8), justify="left", bg="#eaeaea", fg="#111", padx=5, pady=5).pack(anchor="w", padx=10, fill="x")
+
+        tk.Label(scrollable_right, text="Node detail", font=("Segoe UI", 14, "bold"), bg="#f9f9f9").pack(anchor="w", padx=10, pady=(15, 8))
 
         detail_fields = [
             ("split", "Split"),
@@ -300,7 +381,7 @@ class TreeExplorerApp:
         for key, title in detail_fields:
             var = tk.StringVar(value="-")
             self.detail_vars[key] = var
-            row = tk.Frame(right_panel, bg="#f9f9f9")
+            row = tk.Frame(scrollable_right, bg="#f9f9f9")
             row.pack(fill="x", padx=10, pady=2)
             tk.Label(row, text=title, font=("Segoe UI", 11), bg="#f9f9f9", fg="#555").pack(side="left")
             tk.Label(row, textvariable=var, font=("Segoe UI", 11, "bold"), bg="#f9f9f9", fg="#222").pack(side="right")
@@ -312,12 +393,12 @@ class TreeExplorerApp:
         tk.Label(container, text=text, font=("Segoe UI", 10), bg="#f9f9f9").pack(side="left")
         return container
 
-    def _metric_card(self, parent: tk.Widget, title: str) -> tk.StringVar:
+    def _metric_card(self, parent: tk.Widget, title: str, pad_y=3) -> tk.StringVar:
         card = tk.Frame(parent, bg="#f5f3ee", bd=1, relief="solid")
-        card.pack(fill="x", pady=3)
+        card.pack(fill="x", pady=pad_y)
         tk.Label(card, text=title, font=("Segoe UI", 10), bg="#f5f3ee", fg="#666").pack(anchor="w", padx=8, pady=(4, 0))
         var = tk.StringVar(value="-")
-        tk.Label(card, textvariable=var, font=("Segoe UI", 20, "bold"), bg="#f5f3ee", fg="#333").pack(anchor="w", padx=8, pady=(0, 6))
+        tk.Label(card, textvariable=var, font=("Segoe UI", 16, "bold"), bg="#f5f3ee", fg="#333").pack(anchor="w", padx=8, pady=(0, 6))
         return var
 
     def _current(self) -> ScenarioData:
@@ -337,11 +418,23 @@ class TreeExplorerApp:
             text=f"depth: {scenario.summary['depth']} - nodes: {scenario.summary['nodes']} - leaves: {scenario.summary['leaves']}"
         )
 
-        self.metric_vars["train_acc"].set(f"{scenario.metrics['train_acc'] * 100:.1f}%")
         self.metric_vars["test_acc"].set(f"{scenario.metrics['test_acc'] * 100:.1f}%")
+        self.metric_vars["error_rate"].set(f"{scenario.metrics['error_rate'] * 100:.1f}%")
+        self.metric_vars["recall"].set(f"{scenario.metrics['recall'] * 100:.1f}%")
+        self.metric_vars["f1_score"].set(f"{scenario.metrics['f1_score'] * 100:.1f}%")
         self.metric_vars["precision"].set(f"{scenario.metrics['precision'] * 100:.1f}%")
         self.metric_vars["roc_auc"].set(f"{scenario.metrics['roc_auc']:.2f}")
-        self.cm_var.set(str(scenario.metrics["confusion_matrix"]))
+        
+        cm = scenario.metrics["confusion_matrix"]
+        self.cm_var.set(f"[[{cm[0][0]}, {cm[0][1]}], [{cm[1][0]}, {cm[1][1]}]]")
+        
+        feats_text = "\n".join([f"{i+1}. {f[0]} - importance: {f[1]:.3f}" for i, f in enumerate(scenario.top_features)])
+        self.analysis_feats_var.set(feats_text)
+        
+        rules_text = "\n".join(scenario.rules.split("\n")[:12]) + "..."
+        if not rules_text.strip():
+            rules_text = "No prominent rules at depth 2"
+        self.analysis_rules_var.set(rules_text)
 
         gap = scenario.metrics["train_acc"] - scenario.metrics["test_acc"]
         if gap > 0.08:
@@ -440,16 +533,31 @@ class TreeExplorerApp:
 
         item.expanded = True
 
-    def _truncate(self, text: str, max_len: int = 34) -> str:
-        if len(text) <= max_len:
-            return text
-        return text[: max_len - 3] + "..."
-
-    def _item_size(self, iid: str) -> tuple[int, int]:
+    def _item_text(self, iid: str) -> str:
         item = self.visible_items[iid]
         if item.kind == "placeholder":
-            return PLACEHOLDER_W, PLACEHOLDER_H
-        return NODE_W, NODE_H
+            return "..."
+        assert item.node_id is not None
+        info = self._current().node_details[item.node_id]
+        return f"{info['split']}\n{info['samples']} samples\n{info['class']}"
+
+    def _item_size(self, iid: str) -> tuple[float, float]:
+        item = self.visible_items[iid]
+        sf = self.scale_factor
+        if item.kind == "placeholder":
+            return PLACEHOLDER_W * sf, PLACEHOLDER_H * sf
+        
+        text = self._item_text(iid)
+        lines = text.split('\n')
+        max_chars = max(len(line) for line in lines)
+        
+        est_w = max_chars * 7.5 + 40
+        est_h = len(lines) * 18 + 30
+        
+        w = max(150.0, est_w)
+        h = max(NODE_H, est_h)
+        
+        return w * sf, h * sf
 
     def _draw_tree_graph(self) -> None:
         self.canvas.delete("all")
@@ -465,26 +573,54 @@ class TreeExplorerApp:
 
         assign_depth(self.root_item_id, 0)
 
-        x_map: dict[str, float] = {}
-        next_leaf = [0]
+        def calc_width(iid: str) -> float:
+            children = self.visible_children.get(iid, [])
+            
+            item = self.visible_items[iid]
+            if item.kind == "placeholder":
+                node_logical_w = PLACEHOLDER_W / H_SPACING
+            else:
+                text = self._item_text(iid)
+                max_chars = max(len(line) for line in text.split('\n'))
+                est_w = max(150.0, max_chars * 7.5 + 40)
+                node_logical_w = est_w / H_SPACING
+                
+            if not children:
+                return max(1.0, node_logical_w)
+            sizes = [calc_width(c) for c in children]
+            children_w = sum(sizes) + 0.2 * (len(sizes) - 1)
+            return max(children_w, node_logical_w)
 
-        def assign_x(iid: str) -> float:
+        x_map: dict[str, float] = {}
+
+        def assign_x_center(iid: str, x_center: float) -> None:
+            x_map[iid] = x_center
             children = self.visible_children.get(iid, [])
             if not children:
-                x = float(next_leaf[0] * H_SPACING)
-                next_leaf[0] += 1
-            else:
-                child_x = [assign_x(child) for child in children]
-                x = sum(child_x) / len(child_x)
-            x_map[iid] = x
-            return x
+                return
+            
+            total_w = sum(calc_width(c) for c in children) + 0.2 * (len(children) - 1)
+            start_x = x_center - (total_w * H_SPACING) / 2
+            
+            curr_x = start_x
+            for child in children:
+                cw = calc_width(child)
+                child_center = curr_x + (cw * H_SPACING) / 2
+                assign_x_center(child, child_center)
+                curr_x += (cw + 0.2) * H_SPACING
 
-        assign_x(self.root_item_id)
+        assign_x_center(self.root_item_id, 0.0)
+
+        sf = self.scale_factor
+        
+        # Center horizontally at an arbitrary offset so x coords stay positive mostly
+        # We can just center it around 2000 and let scrollregion handles it
+        root_offset_x = 2000.0
 
         centers: dict[str, tuple[float, float]] = {}
         for iid in self.visible_items:
-            x = x_map.get(iid, 0.0) + MARGIN_X
-            y = depth_map.get(iid, 0) * V_SPACING + MARGIN_Y
+            x = x_map.get(iid, 0.0) * sf + root_offset_x
+            y = depth_map.get(iid, 0) * V_SPACING * sf + (MARGIN_Y * sf)
             centers[iid] = (x, y)
 
         for parent, children in self.visible_children.items():
@@ -497,12 +633,12 @@ class TreeExplorerApp:
                     continue
                 cx, cy = centers[child]
                 _, ch = self._item_size(child)
-                self.canvas.create_line(px, py + ph / 2, cx, cy - ch / 2, fill="#9a9a9a", width=1.5)
+                self.canvas.create_line(px, py + ph / 2, cx, cy - ch / 2, fill="#9a9a9a", width=max(1, int(1.5 * sf)))
                 edge_label = self.visible_items[child].edge_label
                 if edge_label:
                     lx = (px + cx) / 2
-                    ly = (py + ph / 2 + cy - ch / 2) / 2 - 8
-                    self.canvas.create_text(lx, ly, text=edge_label, fill="#666", font=("Segoe UI", 10))
+                    ly = (py + ph / 2 + cy - ch / 2) / 2 - (8 * sf)
+                    self.canvas.create_text(lx, ly, text=edge_label, fill="#666", font=("Segoe UI", max(6, int(10 * sf))))
 
         for iid, item in self.visible_items.items():
             x, y = centers[iid]
@@ -513,7 +649,7 @@ class TreeExplorerApp:
                 fill = "#ffffff"
                 border = "#9e9e9e"
                 text = "..."
-                font = ("Segoe UI", 16, "bold")
+                font = ("Segoe UI", max(8, int(16 * sf)), "bold")
             else:
                 assert item.node_id is not None
                 info = self._current().node_details[item.node_id]
@@ -527,15 +663,14 @@ class TreeExplorerApp:
                     fill = LEAF_COLOR
                     border = "#888"
 
-                line1 = self._truncate(info["split"], 34)
-                text = f"{line1}\n{info['samples']} samples\n{info['class']}"
-                font = ("Segoe UI", 10, "bold")
+                text = self._item_text(iid)
+                font = ("Segoe UI", max(6, int(10 * sf)), "bold")
 
             if self.selected_item_id == iid:
-                border_width = 3
+                border_width = 3 * sf
                 border_color = "#845ec2"
             else:
-                border_width = 1.8
+                border_width = max(1.0, 1.8 * sf)
                 border_color = border
 
             item_tag = f"item:{iid}"
@@ -546,7 +681,7 @@ class TreeExplorerApp:
                 y2,
                 fill=fill,
                 outline=border_color,
-                width=border_width,
+                width=max(1, int(border_width)),
                 tags=("item", item_tag),
             )
             self.canvas.create_text(x, y, text=text, font=font, justify="center", tags=("item", item_tag))
@@ -554,6 +689,11 @@ class TreeExplorerApp:
         bbox = self.canvas.bbox("all")
         if bbox:
             self.canvas.configure(scrollregion=(bbox[0] - 50, bbox[1] - 50, bbox[2] + 50, bbox[3] + 50))
+
+        # Center on root node initially if this is the first draw of the scenario
+        # But this will snap view every time. We instead only snap on scenario switch?
+        # Actually xview_moveto can be called. I'll just leave it freeform.
+
 
     def _extract_item_id_from_event(self, event: tk.Event) -> str | None:
         current = self.canvas.find_withtag("current")
@@ -564,6 +704,33 @@ class TreeExplorerApp:
             if tag.startswith("item:"):
                 return tag.split(":", 1)[1]
         return None
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        if hasattr(event, "delta") and getattr(event, "delta") != 0:
+            delta = event.delta
+        elif hasattr(event, "num"):
+            delta = 1 if event.num == 4 else -1
+        else:
+            delta = 0
+            
+        if delta > 0:
+            self.scale_factor *= 1.1
+        elif delta < 0:
+            self.scale_factor /= 1.1
+            
+        self.scale_factor = max(0.2, min(self.scale_factor, 3.0))
+        self._draw_tree_graph()
+
+    def _on_pan_start(self, event: tk.Event) -> None:
+        if self.canvas.find_withtag("current"):
+            self._pan_active = False
+            return
+        self._pan_active = True
+        self.canvas.scan_mark(event.x, event.y)
+
+    def _on_pan_move(self, event: tk.Event) -> None:
+        if getattr(self, "_pan_active", False):
+            self.canvas.scan_dragto(event.x, event.y, gain=1)
 
     def _on_canvas_click(self, event: tk.Event) -> None:
         iid = self._extract_item_id_from_event(event)
