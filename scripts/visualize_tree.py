@@ -357,14 +357,14 @@ class TreeExplorerApp:
 
         tk.Label(
             scrollable_right,
-            text="Ma trận nhầm lẫn  (Confusion Matrix)",
+            text="Confusion Matrix",
             font=("Segoe UI", 11, "bold"),
             bg="#f9f9f9",
             fg="#333",
         ).pack(anchor="w", padx=10)
         tk.Label(
             scrollable_right,
-            text="Mỗi ô cho biết mô hình dự đoán đúng/sai bao nhiêu khách hàng.",
+            text="Each cell indicates how many customers the model correctly/incorrectly predicted.",
             font=("Segoe UI", 9),
             bg="#f9f9f9",
             fg="#888",
@@ -381,7 +381,7 @@ class TreeExplorerApp:
 
         tk.Label(
             scrollable_right,
-            text="Phân tích cây quyết định",
+            text="Decision tree analysis",
             font=("Segoe UI", 13, "bold"),
             bg="#f9f9f9",
         ).pack(anchor="w", padx=10, pady=(0, 2))
@@ -389,14 +389,14 @@ class TreeExplorerApp:
         # ── Feature importance bars ────────────────────────────────────────────
         tk.Label(
             scrollable_right,
-            text="🔑  Đặc trưng quan trọng nhất",
+            text="🔑  Most Important Features",
             font=("Segoe UI", 10, "bold"),
             bg="#f9f9f9",
             fg="#333",
         ).pack(anchor="w", padx=10, pady=(4, 0))
         tk.Label(
             scrollable_right,
-            text="Thanh càng dài → đặc trưng ảnh hưởng càng lớn đến dự đoán.",
+            text="Longer bars → more important features for the model's decisions.",
             font=("Segoe UI", 9),
             bg="#f9f9f9",
             fg="#888",
@@ -410,14 +410,14 @@ class TreeExplorerApp:
         # ── Readable IF-THEN rules ─────────────────────────────────────────────
         tk.Label(
             scrollable_right,
-            text="📋  Quy tắc quyết định (dễ đọc)",
+            text="📋  Decision Rules (Readable)",
             font=("Segoe UI", 10, "bold"),
             bg="#f9f9f9",
             fg="#333",
         ).pack(anchor="w", padx=10, pady=(6, 0))
         tk.Label(
             scrollable_right,
-            text="Các con đường mô hình đi qua để đưa ra dự đoán.",
+            text="The model follows these paths to make predictions.",
             font=("Segoe UI", 9),
             bg="#f9f9f9",
             fg="#888",
@@ -434,19 +434,19 @@ class TreeExplorerApp:
 
         tk.Label(
             scrollable_right,
-            text="Chi tiết nút được chọn",
+            text="Node Details",
             font=("Segoe UI", 13, "bold"),
             bg="#f9f9f9",
         ).pack(anchor="w", padx=10, pady=(0, 4))
 
         detail_fields = [
-            ("split",    "Điều kiện tách",       "Điều kiện mà nút này kiểm tra"),
-            ("samples",  "Số mẫu",               "Bao nhiêu khách hàng đi qua nút này"),
-            ("gini",     "Gini (độ hỗn loạn)",   "0 = thuần khiết, 0.5 = lẫn lộn nhất"),
-            ("class",    "Dự đoán",              "Nhãn mà nút này dự đoán"),
-            ("churn_pct","% Churn",               "Tỉ lệ khách hàng rời bỏ trong nút này"),
-            ("threshold","Ngưỡng phân tách",      "Giá trị ngưỡng của điều kiện"),
-            ("value",    "Phân bố [Ở lại, Rời]", "Số mẫu theo từng nhãn"),
+            ("split",    "Split Condition",       "The condition that this node checks"),
+            ("samples",  "Number of Samples",     "How many customers passed through this node"),
+            ("gini",     "Gini Impurity",         "0 = pure, 0.5 = most impure"),
+            ("class",    "Prediction",            "The label that this node predicts"),
+            ("churn_pct","Churn Percentage",      "The percentage of customers who churned in this node"),
+            ("threshold","Split Threshold",         "The threshold value for the split condition"),
+            ("value",    "Class Distribution [Stay, Leave]", "Number of samples for each class in this node"),
         ]
 
         for key, title, hint in detail_fields:
@@ -506,9 +506,9 @@ class TreeExplorerApp:
         cm = scenario.metrics["confusion_matrix"]
         tn, fp, fn, tp = cm[0][0], cm[0][1], cm[1][0], cm[1][1]
         _cm_data = [
-            ("",              "Dự đoán: Ở lại", "Dự đoán: Rời"),
-            ("Thực: Ở lại",   f"✅ {tn}",        f"❌ {fp}"),
-            ("Thực: Rời",     f"❌ {fn}",        f"✅ {tp}"),
+            ("",              "Prediction: no Churn", "Prediction: Churn"),
+            ("Actual: no Churn",   f"✅ {tn}",        f"❌ {fp}"),
+            ("Actual: Churn",     f"❌ {fn}",        f"✅ {tp}"),
         ]
         _cm_colors = [
             ("#e8e8e8", "#e8e8e8", "#e8e8e8"),
@@ -572,22 +572,27 @@ class TreeExplorerApp:
         rule_cards: list[tuple[list[str], str]] = []  # (conditions, leaf_label)
 
         for line in lines:
-            stripped = line.lstrip("|").strip()
-            indent = (len(line) - len(line.lstrip("|"))) // 4
+            if "|--- " not in line:
+                continue
+                
+            parts = line.split("|--- ", 1)
+            prefix = parts[0]
+            content = parts[1].strip()
+            depth = prefix.count("|")
 
-            if stripped.startswith("--- "):
-                cond = stripped[4:]
-                if indent < len(conditions):
-                    conditions = conditions[:indent]
-                conditions.append(cond)
-            elif stripped.startswith("class:"):
-                label = stripped.replace("class:", "").strip()
-                if rule_cards.__len__() < 4:
-                    rule_cards.append((list(conditions), label))
+            if "class:" in content:
+                label = content.split("class:")[1].strip()
+                if len(rule_cards) < 4:
+                    rule_cards.append((list(conditions[:depth]), label))
+            else:
+                conditions = conditions[:depth]
+                conditions.append(content)
 
         _card_colors = {
-            "1": ("#fff3e0", "#d84315", "🔴  DỰ ĐOÁN: RỜI BỎ"),
-            "0": ("#e8f5e9", "#2e7d32", "🟢  DỰ ĐOÁN: Ở LẠI"),
+            "1": ("#fff3e0", "#d84315", "🔴  DỰ ĐOÁN: QUYẾT ĐỊNH RỜI BỎ"),
+            "Churn": ("#fff3e0", "#d84315", "🔴  DỰ ĐOÁN: QUYẾT ĐỊNH RỜI BỎ"),
+            "0": ("#e8f5e9", "#2e7d32", "🟢  DỰ ĐOÁN: TIẾP TỤC Ở LẠI"),
+            "No churn": ("#e8f5e9", "#2e7d32", "🟢  DỰ ĐOÁN: TIẾP TỤC Ở LẠI"),
         }
         if not rule_cards:
             tk.Label(self.rules_frame, text="Không có quy tắc.", font=("Segoe UI", 9), bg="#f9f9f9", fg="#888").pack()
