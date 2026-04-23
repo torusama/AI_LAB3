@@ -55,7 +55,8 @@ def _class_label(pred_class: int) -> str:
     return "Churn" if pred_class == 1 else "No churn"
 
 
-def _fit_pruned_tree(X_train, y_train, X_test, y_test) -> DecisionTreeClassifier:
+def _fit_pruned_tree(X_train, y_train) -> DecisionTreeClassifier:
+    from sklearn.model_selection import GridSearchCV
     base = DecisionTreeClassifier(random_state=42)
     base.fit(X_train, y_train)
 
@@ -65,18 +66,16 @@ def _fit_pruned_tree(X_train, y_train, X_test, y_test) -> DecisionTreeClassifier
         return base
 
     candidates = sorted(set(alphas))[:: max(1, len(alphas) // 20)]
-    best_model = base
-    best_acc = accuracy_score(y_test, base.predict(X_test))
+    
+    grid_search = GridSearchCV(
+        DecisionTreeClassifier(random_state=42),
+        param_grid={'ccp_alpha': candidates},
+        cv=5,
+        scoring='accuracy'
+    )
+    grid_search.fit(X_train, y_train)
 
-    for alpha in candidates:
-        model = DecisionTreeClassifier(random_state=42, ccp_alpha=alpha)
-        model.fit(X_train, y_train)
-        test_acc = accuracy_score(y_test, model.predict(X_test))
-        if test_acc >= best_acc:
-            best_acc = test_acc
-            best_model = model
-
-    return best_model
+    return grid_search.best_estimator_
 
 
 def _node_payload(clf: DecisionTreeClassifier, feature_names: list[str]) -> dict[int, dict]:
@@ -1119,7 +1118,7 @@ def visualize_baseline_tree() -> None:
         cv_text=baseline_cv_text,
     )
     baseline_metrics = baseline_scenario.metrics
-    pruned = _fit_pruned_tree(X_train, y_train, X_test, y_test)
+    pruned = _fit_pruned_tree(X_train, y_train)
 
     scenarios = [
         baseline_scenario,
