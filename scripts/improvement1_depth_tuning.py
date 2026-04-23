@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import joblib
 import pandas as pd
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.tree import DecisionTreeClassifier
 
@@ -13,18 +15,25 @@ def _evaluate_holdout(model, X_train, X_test, y_train, y_test) -> dict[str, floa
     y_train_pred = model.predict(X_train)
     y_test_pred = model.predict(X_test)
     y_test_proba = model.predict_proba(X_test)[:, 1]
+    cm = confusion_matrix(y_test, y_test_pred)
 
     train_acc = float(accuracy_score(y_train, y_train_pred))
     test_acc = float(accuracy_score(y_test, y_test_pred))
+    precision_churn = float(precision_score(y_test, y_test_pred, zero_division=0))
+    recall_churn = float(recall_score(y_test, y_test_pred, zero_division=0))
     f1_churn = float(f1_score(y_test, y_test_pred, zero_division=0))
     roc_auc = float(roc_auc_score(y_test, y_test_proba))
 
     return {
         "train_acc": train_acc,
         "test_acc": test_acc,
+        "error_rate": float(1 - test_acc),
+        "precision_churn": precision_churn,
+        "recall_churn": recall_churn,
         "f1_churn": f1_churn,
         "roc_auc": roc_auc,
         "gap": float(train_acc - test_acc),
+        "confusion_matrix": cm.astype(int).tolist(),
     }
 
 
@@ -184,9 +193,13 @@ def run_improvement1() -> None:
         "cv_mean_roc_auc": best_row["cv_mean_roc_auc"],
         "train_acc": best_row["train_acc"],
         "test_acc": best_row["test_acc"],
+        "error_rate": best_row["error_rate"],
+        "precision_churn": best_row["precision_churn"],
+        "recall_churn": best_row["recall_churn"],
         "f1_churn": best_row["f1_churn"],
         "roc_auc": best_row["roc_auc"],
         "gap": best_row["gap"],
+        "confusion_matrix": best_row["confusion_matrix"],
     }
 
     comparison_df = pd.DataFrame(
@@ -196,27 +209,39 @@ def run_improvement1() -> None:
                 "CV Mean ROC-AUC",
                 "Train Acc",
                 "Test Acc",
+                "Error Rate",
+                "Precision (Churn)",
+                "Recall (Churn)",
                 "F1 (Churn)",
                 "ROC-AUC",
                 "Gap",
+                "Confusion Matrix",
             ],
             "Baseline": [
                 baseline_metrics["cv_mean_f1"],
                 baseline_metrics["cv_mean_roc_auc"],
                 baseline_metrics["train_acc"],
                 baseline_metrics["test_acc"],
+                baseline_metrics["error_rate"],
+                baseline_metrics["precision_churn"],
+                baseline_metrics["recall_churn"],
                 baseline_metrics["f1_churn"],
                 baseline_metrics["roc_auc"],
                 baseline_metrics["gap"],
+                json.dumps(baseline_metrics["confusion_matrix"]),
             ],
             "Improved": [
                 improved_metrics["cv_mean_f1"],
                 improved_metrics["cv_mean_roc_auc"],
                 improved_metrics["train_acc"],
                 improved_metrics["test_acc"],
+                improved_metrics["error_rate"],
+                improved_metrics["precision_churn"],
+                improved_metrics["recall_churn"],
                 improved_metrics["f1_churn"],
                 improved_metrics["roc_auc"],
                 improved_metrics["gap"],
+                json.dumps(improved_metrics["confusion_matrix"]),
             ],
         }
     )
@@ -264,16 +289,24 @@ def run_improvement1() -> None:
                 "cv_mean_roc_auc": baseline_metrics["cv_mean_roc_auc"],
                 "train_acc": baseline_metrics["train_acc"],
                 "test_acc": baseline_metrics["test_acc"],
+                "error_rate": baseline_metrics["error_rate"],
+                "precision_churn": baseline_metrics["precision_churn"],
+                "recall_churn": baseline_metrics["recall_churn"],
                 "f1_churn": baseline_metrics["f1_churn"],
                 "roc_auc": baseline_metrics["roc_auc"],
+                "confusion_matrix": baseline_metrics["confusion_matrix"],
             },
             "improved": {
                 "cv_mean_f1": improved_metrics["cv_mean_f1"],
                 "cv_mean_roc_auc": improved_metrics["cv_mean_roc_auc"],
                 "train_acc": improved_metrics["train_acc"],
                 "test_acc": improved_metrics["test_acc"],
+                "error_rate": improved_metrics["error_rate"],
+                "precision_churn": improved_metrics["precision_churn"],
+                "recall_churn": improved_metrics["recall_churn"],
                 "f1_churn": improved_metrics["f1_churn"],
                 "roc_auc": improved_metrics["roc_auc"],
+                "confusion_matrix": improved_metrics["confusion_matrix"],
             },
             "accuracy_gap_baseline": baseline_metrics["gap"],
             "accuracy_gap_improved": improved_metrics["gap"],
@@ -294,7 +327,10 @@ def run_improvement1() -> None:
     print(
         comparison_df.to_string(
             index=False,
-            formatters={"Baseline": "{:.4f}".format, "Improved": "{:.4f}".format},
+            formatters={
+                "Baseline": lambda value: f"{value:.4f}" if isinstance(value, (int, float)) else str(value),
+                "Improved": lambda value: f"{value:.4f}" if isinstance(value, (int, float)) else str(value),
+            },
         )
     )
 

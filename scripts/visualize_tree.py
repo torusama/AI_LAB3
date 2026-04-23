@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tkinter as tk
 from dataclasses import dataclass
 from tkinter import ttk
@@ -7,7 +8,7 @@ from tkinter import ttk
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score, f1_score, roc_auc_score
 from sklearn.tree import DecisionTreeClassifier, export_text, _tree
 
-from common import MODEL_DIR, ensure_directories, get_default_model_path, load_model, load_splits
+from common import MODEL_DIR, REPORT_DIR, ensure_directories, get_default_model_path, load_model, load_splits
 
 
 NO_CHURN_COLOR = "#f0b55f"
@@ -32,6 +33,8 @@ class ScenarioData:
     feature_names: list[str]
     metrics: dict
     summary: dict
+    params_text: str
+    delta_text: str
     node_details: dict[int, dict]
     top_features: list[tuple[str, float]]
     rules: str
@@ -130,7 +133,28 @@ def _node_payload(clf: DecisionTreeClassifier, feature_names: list[str]) -> dict
     return payload
 
 
-def _scenario_payload(name: str, clf: DecisionTreeClassifier, X_train, y_train, X_test, y_test) -> ScenarioData:
+def _format_model_params(clf: DecisionTreeClassifier) -> str:
+    params = clf.get_params()
+    ccp_alpha = float(params.get("ccp_alpha", 0.0))
+    return (
+        f"criterion={params.get('criterion')} | "
+        f"max_depth={params.get('max_depth')} | "
+        f"min_samples_split={params.get('min_samples_split')} | "
+        f"min_samples_leaf={params.get('min_samples_leaf')} | "
+        f"class_weight={params.get('class_weight')} | "
+        f"ccp_alpha={ccp_alpha:.4f}"
+    )
+
+
+def _scenario_payload(
+    name: str,
+    clf: DecisionTreeClassifier,
+    X_train,
+    y_train,
+    X_test,
+    y_test,
+    baseline_metrics: dict | None = None,
+) -> ScenarioData:
     y_train_pred = clf.predict(X_train)
     y_test_pred = clf.predict(X_test)
     y_test_proba = clf.predict_proba(X_test)[:, 1]
@@ -152,6 +176,19 @@ def _scenario_payload(name: str, clf: DecisionTreeClassifier, X_train, y_train, 
         "nodes": int(clf.tree_.node_count),
         "leaves": int(clf.get_n_leaves()),
     }
+
+    if baseline_metrics is None:
+        delta_text = "Delta vs baseline: this is the baseline model."
+    else:
+        delta_text = (
+            "Delta vs baseline: "
+            f"Test Acc {metrics['test_acc'] - baseline_metrics['test_acc']:+.4f} | "
+            f"Precision {metrics['precision'] - baseline_metrics['precision']:+.4f} | "
+            f"Recall {metrics['recall'] - baseline_metrics['recall']:+.4f} | "
+            f"F1 {metrics['f1_score'] - baseline_metrics['f1_score']:+.4f} | "
+            f"ROC-AUC {metrics['roc_auc'] - baseline_metrics['roc_auc']:+.4f} | "
+            f"Gap {(metrics['train_acc'] - metrics['test_acc']) - (baseline_metrics['train_acc'] - baseline_metrics['test_acc']):+.4f}"
+        )
     
     importances = clf.feature_importances_
     features_scored = sorted(zip(X_train.columns, importances), key=lambda x: x[1], reverse=True)
@@ -165,6 +202,8 @@ def _scenario_payload(name: str, clf: DecisionTreeClassifier, X_train, y_train, 
         feature_names=list(X_train.columns),
         metrics=metrics,
         summary=summary,
+        params_text=_format_model_params(clf),
+        delta_text=delta_text,
         node_details=_node_payload(clf, list(X_train.columns)),
         top_features=top_features,
         rules=rules,
@@ -258,6 +297,28 @@ class TreeExplorerApp:
 
         self.tree_summary = tk.Label(header, text="", font=("Segoe UI", 11), fg="#444", bg="#f9f9f9")
         self.tree_summary.grid(row=0, column=1, sticky="e")
+
+        self.param_summary = tk.Label(
+            header,
+            text="",
+            font=("Consolas", 9),
+            fg="#666",
+            bg="#f9f9f9",
+            justify="right",
+            wraplength=700,
+        )
+        self.param_summary.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+
+        self.delta_summary = tk.Label(
+            header,
+            text="",
+            font=("Segoe UI", 9),
+            fg="#666",
+            bg="#f9f9f9",
+            justify="left",
+            wraplength=1100,
+        )
+        self.delta_summary.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         graph_frame = tk.Frame(left_panel, bg="#f9f9f9")
         graph_frame.grid(row=1, column=0, sticky="nsew", padx=12)
@@ -491,6 +552,8 @@ class TreeExplorerApp:
         self.tree_summary.configure(
             text=f"depth: {scenario.summary['depth']} - nodes: {scenario.summary['nodes']} - leaves: {scenario.summary['leaves']}"
         )
+        self.param_summary.configure(text=scenario.params_text)
+        self.delta_summary.configure(text=scenario.delta_text)
 
         self.metric_vars["train_acc"].set(f"{scenario.metrics['train_acc'] * 100:.1f}%")
         self.metric_vars["test_acc"].set(f"{scenario.metrics['test_acc'] * 100:.1f}%")
@@ -946,31 +1009,49 @@ def _load_or_fit_baseline(X_train, y_train) -> DecisionTreeClassifier:
         return model
 
 
+def _load_json_if_exists(path):
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as fp:
+        return json.load(fp)
+
+
 def visualize_baseline_tree() -> None:
     X_train, X_test, y_train, y_test = load_splits()
 
     baseline = _load_or_fit_baseline(X_train, y_train)
-
-    max_depth_5 = DecisionTreeClassifier(max_depth=5, random_state=42)
-    max_depth_5.fit(X_train, y_train)
-
-    entropy_tree = DecisionTreeClassifier(criterion="entropy", random_state=42)
-    entropy_tree.fit(X_train, y_train)
-
+    baseline_scenario = _scenario_payload("Baseline", baseline, X_train, y_train, X_test, y_test)
+    baseline_metrics = baseline_scenario.metrics
     pruned = _fit_pruned_tree(X_train, y_train, X_test, y_test)
 
     scenarios = [
-        _scenario_payload("Baseline", baseline, X_train, y_train, X_test, y_test),
-        _scenario_payload("max_depth=5", max_depth_5, X_train, y_train, X_test, y_test),
-        _scenario_payload("Entropy", entropy_tree, X_train, y_train, X_test, y_test),
-        _scenario_payload("Pruned", pruned, X_train, y_train, X_test, y_test),
+        baseline_scenario,
+        _scenario_payload("Pruned", pruned, X_train, y_train, X_test, y_test, baseline_metrics),
     ]
 
-    imp2_path = MODEL_DIR / "improvement2_balanced.joblib"
-    if imp2_path.exists():
-        imp2_model = load_model(imp2_path)
+    imp1_path = MODEL_DIR / "improvement1_depth_tuned.joblib"
+    if imp1_path.exists():
+        imp1_model = load_model(imp1_path)
         scenarios.append(
-            _scenario_payload("Balanced", imp2_model, X_train, y_train, X_test, y_test)
+            _scenario_payload("Imp1 tuned", imp1_model, X_train, y_train, X_test, y_test, baseline_metrics)
+        )
+
+    imp2_summary = _load_json_if_exists(REPORT_DIR / "improvement2_summary.json")
+    imp2_best_path = MODEL_DIR / "improvement2_best_criterion.joblib"
+    if imp2_best_path.exists():
+        imp2_best_model = load_model(imp2_best_path)
+        best_criterion = "Best criterion"
+        if imp2_summary and imp2_summary.get("best_criterion"):
+            best_criterion = f"Imp2 {imp2_summary['best_criterion']}"
+        scenarios.append(
+            _scenario_payload(best_criterion, imp2_best_model, X_train, y_train, X_test, y_test, baseline_metrics)
+        )
+
+    imp2_balanced_path = MODEL_DIR / "improvement2_balanced.joblib"
+    if imp2_balanced_path.exists():
+        imp2_balanced_model = load_model(imp2_balanced_path)
+        scenarios.append(
+            _scenario_payload("Bonus balanced", imp2_balanced_model, X_train, y_train, X_test, y_test, baseline_metrics)
         )
 
     root = tk.Tk()
