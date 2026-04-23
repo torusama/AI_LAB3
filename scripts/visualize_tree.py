@@ -33,6 +33,7 @@ class ScenarioData:
     feature_names: list[str]
     metrics: dict
     summary: dict
+    cv_text: str
     params_text: str
     delta_text: str
     node_details: dict[int, dict]
@@ -137,12 +138,13 @@ def _format_model_params(clf: DecisionTreeClassifier) -> str:
     params = clf.get_params()
     ccp_alpha = float(params.get("ccp_alpha", 0.0))
     return (
-        f"criterion={params.get('criterion')} | "
-        f"max_depth={params.get('max_depth')} | "
-        f"min_samples_split={params.get('min_samples_split')} | "
-        f"min_samples_leaf={params.get('min_samples_leaf')} | "
-        f"class_weight={params.get('class_weight')} | "
-        f"ccp_alpha={ccp_alpha:.4f}"
+        "Hyperparameters\n"
+        f"criterion: {params.get('criterion')}\n"
+        f"max_depth: {params.get('max_depth')}\n"
+        f"min_samples_split: {params.get('min_samples_split')}\n"
+        f"min_samples_leaf: {params.get('min_samples_leaf')}\n"
+        f"class_weight: {params.get('class_weight')}\n"
+        f"ccp_alpha: {ccp_alpha:.4f}"
     )
 
 
@@ -154,6 +156,7 @@ def _scenario_payload(
     X_test,
     y_test,
     baseline_metrics: dict | None = None,
+    cv_text: str | None = None,
 ) -> ScenarioData:
     y_train_pred = clf.predict(X_train)
     y_test_pred = clf.predict(X_test)
@@ -178,16 +181,16 @@ def _scenario_payload(
     }
 
     if baseline_metrics is None:
-        delta_text = "Delta vs baseline: this is the baseline model."
+        delta_text = "Delta vs baseline\nThis is the baseline model."
     else:
         delta_text = (
-            "Delta vs baseline: "
-            f"Test Acc {metrics['test_acc'] - baseline_metrics['test_acc']:+.4f} | "
-            f"Precision {metrics['precision'] - baseline_metrics['precision']:+.4f} | "
-            f"Recall {metrics['recall'] - baseline_metrics['recall']:+.4f} | "
-            f"F1 {metrics['f1_score'] - baseline_metrics['f1_score']:+.4f} | "
-            f"ROC-AUC {metrics['roc_auc'] - baseline_metrics['roc_auc']:+.4f} | "
-            f"Gap {(metrics['train_acc'] - metrics['test_acc']) - (baseline_metrics['train_acc'] - baseline_metrics['test_acc']):+.4f}"
+            "Delta vs baseline\n"
+            f"Test Acc: {metrics['test_acc'] - baseline_metrics['test_acc']:+.4f}\n"
+            f"Precision: {metrics['precision'] - baseline_metrics['precision']:+.4f}\n"
+            f"Recall: {metrics['recall'] - baseline_metrics['recall']:+.4f}\n"
+            f"F1: {metrics['f1_score'] - baseline_metrics['f1_score']:+.4f}\n"
+            f"ROC-AUC: {metrics['roc_auc'] - baseline_metrics['roc_auc']:+.4f}\n"
+            f"Gap: {(metrics['train_acc'] - metrics['test_acc']) - (baseline_metrics['train_acc'] - baseline_metrics['test_acc']):+.4f}"
         )
     
     importances = clf.feature_importances_
@@ -202,6 +205,7 @@ def _scenario_payload(
         feature_names=list(X_train.columns),
         metrics=metrics,
         summary=summary,
+        cv_text=cv_text or "Cross-validation\nCV Mean F1: n/a\nCV Mean ROC-AUC: n/a",
         params_text=_format_model_params(clf),
         delta_text=delta_text,
         node_details=_node_payload(clf, list(X_train.columns)),
@@ -287,6 +291,7 @@ class TreeExplorerApp:
         header = tk.Frame(left_panel, bg="#f9f9f9")
         header.grid(row=0, column=0, sticky="ew", padx=12, pady=10)
         header.grid_columnconfigure(0, weight=1)
+        header.grid_columnconfigure(1, weight=1)
 
         tk.Label(
             header,
@@ -297,28 +302,6 @@ class TreeExplorerApp:
 
         self.tree_summary = tk.Label(header, text="", font=("Segoe UI", 11), fg="#444", bg="#f9f9f9")
         self.tree_summary.grid(row=0, column=1, sticky="e")
-
-        self.param_summary = tk.Label(
-            header,
-            text="",
-            font=("Consolas", 9),
-            fg="#666",
-            bg="#f9f9f9",
-            justify="right",
-            wraplength=700,
-        )
-        self.param_summary.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-
-        self.delta_summary = tk.Label(
-            header,
-            text="",
-            font=("Segoe UI", 9),
-            fg="#666",
-            bg="#f9f9f9",
-            justify="left",
-            wraplength=1100,
-        )
-        self.delta_summary.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         graph_frame = tk.Frame(left_panel, bg="#f9f9f9")
         graph_frame.grid(row=1, column=0, sticky="nsew", padx=12)
@@ -411,6 +394,102 @@ class TreeExplorerApp:
         m_f7.grid(row=2, column=0, sticky="ew", padx=2)
         
         self.metric_vars["f1_score"] = self._metric_card(m_f7, "F1-score", pad_y=0)
+
+        sep0 = tk.Frame(scrollable_right, bg="#ddd", height=1)
+        sep0.pack(fill="x", padx=10, pady=(6, 6))
+
+        tk.Label(
+            scrollable_right,
+            text="Model Summary",
+            font=("Segoe UI", 11, "bold"),
+            bg="#f9f9f9",
+            fg="#333",
+        ).pack(anchor="w", padx=10)
+
+        summary_container = tk.Frame(scrollable_right, bg="#f9f9f9")
+        summary_container.pack(fill="x", padx=10, pady=(4, 6))
+        summary_container.grid_columnconfigure(0, weight=1)
+        summary_container.grid_columnconfigure(1, weight=1)
+
+        structure_card = tk.Frame(summary_container, bg="#f5f3ee", bd=1, relief="solid")
+        structure_card.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=(0, 6))
+        tk.Label(
+            structure_card,
+            text="Structure",
+            font=("Segoe UI", 10),
+            bg="#f5f3ee",
+            fg="#666",
+        ).pack(anchor="w", padx=8, pady=(6, 2))
+        self.tree_summary_right = tk.Label(
+            structure_card,
+            text="",
+            font=("Segoe UI", 10, "bold"),
+            fg="#333",
+            bg="#f5f3ee",
+            justify="left",
+            wraplength=145,
+        )
+        self.tree_summary_right.pack(anchor="w", padx=8, pady=(0, 8))
+
+        cv_card = tk.Frame(summary_container, bg="#eef4fb", bd=1, relief="solid")
+        cv_card.grid(row=0, column=1, sticky="nsew", padx=(4, 0), pady=(0, 6))
+        tk.Label(
+            cv_card,
+            text="Cross-validation",
+            font=("Segoe UI", 10),
+            bg="#eef4fb",
+            fg="#5c6f82",
+        ).pack(anchor="w", padx=8, pady=(6, 2))
+        self.cv_summary = tk.Label(
+            cv_card,
+            text="",
+            font=("Segoe UI", 9, "bold"),
+            fg="#234",
+            bg="#eef4fb",
+            justify="left",
+            wraplength=145,
+        )
+        self.cv_summary.pack(anchor="w", padx=8, pady=(0, 8))
+
+        param_card = tk.Frame(summary_container, bg="#f6f1e8", bd=1, relief="solid")
+        param_card.grid(row=1, column=0, sticky="nsew", padx=(0, 4))
+        tk.Label(
+            param_card,
+            text="Hyperparameters",
+            font=("Segoe UI", 10),
+            bg="#f6f1e8",
+            fg="#7a6a52",
+        ).pack(anchor="w", padx=8, pady=(6, 2))
+        self.param_summary = tk.Label(
+            param_card,
+            text="",
+            font=("Consolas", 9),
+            fg="#5e584e",
+            bg="#f6f1e8",
+            justify="left",
+            wraplength=145,
+        )
+        self.param_summary.pack(anchor="w", padx=8, pady=(0, 8))
+
+        delta_card = tk.Frame(summary_container, bg="#eef7ef", bd=1, relief="solid")
+        delta_card.grid(row=1, column=1, sticky="nsew", padx=(4, 0))
+        tk.Label(
+            delta_card,
+            text="Delta vs Baseline",
+            font=("Segoe UI", 10),
+            bg="#eef7ef",
+            fg="#4f7757",
+        ).pack(anchor="w", padx=8, pady=(6, 2))
+        self.delta_summary = tk.Label(
+            delta_card,
+            text="",
+            font=("Segoe UI", 9),
+            fg="#35523a",
+            bg="#eef7ef",
+            justify="left",
+            wraplength=145,
+        )
+        self.delta_summary.pack(anchor="w", padx=8, pady=(0, 8))
 
         # ── Confusion Matrix as a readable 2×2 table ──────────────────────────
         sep1 = tk.Frame(scrollable_right, bg="#ddd", height=1)
@@ -549,9 +628,11 @@ class TreeExplorerApp:
 
         scenario = self._current()
 
-        self.tree_summary.configure(
-            text=f"depth: {scenario.summary['depth']} - nodes: {scenario.summary['nodes']} - leaves: {scenario.summary['leaves']}"
+        self.tree_summary.configure(text="")
+        self.tree_summary_right.configure(
+            text=f"Depth: {scenario.summary['depth']} | Nodes: {scenario.summary['nodes']} | Leaves: {scenario.summary['leaves']}"
         )
+        self.cv_summary.configure(text=scenario.cv_text)
         self.param_summary.configure(text=scenario.params_text)
         self.delta_summary.configure(text=scenario.delta_text)
 
@@ -1019,8 +1100,26 @@ def _load_json_if_exists(path):
 def visualize_baseline_tree() -> None:
     X_train, X_test, y_train, y_test = load_splits()
 
+    imp1_summary = _load_json_if_exists(REPORT_DIR / "improvement1_summary.json")
+    imp2_summary = _load_json_if_exists(REPORT_DIR / "improvement2_summary.json")
+
     baseline = _load_or_fit_baseline(X_train, y_train)
-    baseline_scenario = _scenario_payload("Baseline", baseline, X_train, y_train, X_test, y_test)
+    baseline_cv_text = "Cross-validation\nCV Mean F1: n/a\nCV Mean ROC-AUC: n/a"
+    if imp1_summary and "baseline" in imp1_summary:
+        baseline_cv_text = (
+            "Cross-validation\n"
+            f"CV Mean F1: {imp1_summary['baseline'].get('cv_mean_f1', float('nan')):.4f}\n"
+            f"CV Mean ROC-AUC: {imp1_summary['baseline'].get('cv_mean_roc_auc', float('nan')):.4f}"
+        )
+    baseline_scenario = _scenario_payload(
+        "Baseline",
+        baseline,
+        X_train,
+        y_train,
+        X_test,
+        y_test,
+        cv_text=baseline_cv_text,
+    )
     baseline_metrics = baseline_scenario.metrics
     pruned = _fit_pruned_tree(X_train, y_train, X_test, y_test)
 
@@ -1032,26 +1131,80 @@ def visualize_baseline_tree() -> None:
     imp1_path = MODEL_DIR / "improvement1_depth_tuned.joblib"
     if imp1_path.exists():
         imp1_model = load_model(imp1_path)
+        imp1_cv_text = "Cross-validation\nCV Mean F1: n/a\nCV Mean ROC-AUC: n/a"
+        if imp1_summary and "improved" in imp1_summary:
+            imp1_cv_text = (
+                "Cross-validation\n"
+                f"CV Mean F1: {imp1_summary['improved'].get('cv_mean_f1', float('nan')):.4f}\n"
+                f"CV Mean ROC-AUC: {imp1_summary['improved'].get('cv_mean_roc_auc', float('nan')):.4f}"
+            )
         scenarios.append(
-            _scenario_payload("Imp1 tuned", imp1_model, X_train, y_train, X_test, y_test, baseline_metrics)
+            _scenario_payload(
+                "max_depth=5",
+                imp1_model,
+                X_train,
+                y_train,
+                X_test,
+                y_test,
+                baseline_metrics,
+                cv_text=imp1_cv_text,
+            )
         )
 
-    imp2_summary = _load_json_if_exists(REPORT_DIR / "improvement2_summary.json")
     imp2_best_path = MODEL_DIR / "improvement2_best_criterion.joblib"
     if imp2_best_path.exists():
         imp2_best_model = load_model(imp2_best_path)
-        best_criterion = "Best criterion"
+        best_criterion = "Entropy"
+        imp2_cv_text = "Cross-validation\nCV Mean F1: n/a\nCV Mean ROC-AUC: n/a"
         if imp2_summary and imp2_summary.get("best_criterion"):
-            best_criterion = f"Imp2 {imp2_summary['best_criterion']}"
+            criterion_name = str(imp2_summary["best_criterion"]).strip().lower()
+            if criterion_name == "gini":
+                best_criterion = "Gini"
+            elif criterion_name == "log_loss":
+                best_criterion = "Log Loss"
+            criterion_payload = imp2_summary.get("criterion_results", {}).get(criterion_name)
+            if criterion_payload:
+                imp2_cv_text = (
+                    "Cross-validation\n"
+                    f"CV Mean F1: {criterion_payload.get('cv_mean_f1', float('nan')):.4f}\n"
+                    f"CV Mean ROC-AUC: {criterion_payload.get('cv_mean_roc_auc', float('nan')):.4f}"
+                )
         scenarios.append(
-            _scenario_payload(best_criterion, imp2_best_model, X_train, y_train, X_test, y_test, baseline_metrics)
+            _scenario_payload(
+                best_criterion,
+                imp2_best_model,
+                X_train,
+                y_train,
+                X_test,
+                y_test,
+                baseline_metrics,
+                cv_text=imp2_cv_text,
+            )
         )
 
     imp2_balanced_path = MODEL_DIR / "improvement2_balanced.joblib"
     if imp2_balanced_path.exists():
         imp2_balanced_model = load_model(imp2_balanced_path)
+        balanced_cv_text = "Cross-validation\nCV Mean F1: n/a\nCV Mean ROC-AUC: n/a"
+        if imp2_summary:
+            balanced_payload = imp2_summary.get("all_models", {}).get("Bonus - gini + balanced")
+            if balanced_payload:
+                balanced_cv_text = (
+                    "Cross-validation\n"
+                    f"CV Mean F1: {balanced_payload.get('cv_mean_f1', float('nan')):.4f}\n"
+                    f"CV Mean ROC-AUC: {balanced_payload.get('cv_mean_roc_auc', float('nan')):.4f}"
+                )
         scenarios.append(
-            _scenario_payload("Bonus balanced", imp2_balanced_model, X_train, y_train, X_test, y_test, baseline_metrics)
+            _scenario_payload(
+                "Balanced",
+                imp2_balanced_model,
+                X_train,
+                y_train,
+                X_test,
+                y_test,
+                baseline_metrics,
+                cv_text=balanced_cv_text,
+            )
         )
 
     root = tk.Tk()
