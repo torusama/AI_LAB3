@@ -7,7 +7,7 @@ from tkinter import ttk
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score, f1_score, roc_auc_score
 from sklearn.tree import DecisionTreeClassifier, export_text, _tree
 
-from common import ensure_directories, get_default_model_path, load_model, load_splits
+from common import MODEL_DIR, ensure_directories, get_default_model_path, load_model, load_splits
 
 
 NO_CHURN_COLOR = "#f0b55f"
@@ -960,6 +960,13 @@ def visualize_baseline_tree() -> None:
         _scenario_payload("Entropy", entropy_tree, X_train, y_train, X_test, y_test),
         _scenario_payload("Pruned", pruned, X_train, y_train, X_test, y_test),
     ]
+
+    imp2_path = MODEL_DIR / "improvement2_balanced.joblib"
+    if imp2_path.exists():
+        imp2_model = load_model(imp2_path)
+        scenarios.append(
+            _scenario_payload("Balanced", imp2_model, X_train, y_train, X_test, y_test)
+        )
 
     root = tk.Tk()
     TreeExplorerApp(root, scenarios)
