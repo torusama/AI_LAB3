@@ -138,7 +138,6 @@ def _format_model_params(clf: DecisionTreeClassifier) -> str:
     params = clf.get_params()
     ccp_alpha = float(params.get("ccp_alpha", 0.0))
     return (
-        "Hyperparameters\n"
         f"criterion: {params.get('criterion')}\n"
         f"max_depth: {params.get('max_depth')}\n"
         f"min_samples_split: {params.get('min_samples_split')}\n"
@@ -181,10 +180,9 @@ def _scenario_payload(
     }
 
     if baseline_metrics is None:
-        delta_text = "Delta vs baseline\nThis is the baseline model."
+        delta_text = "This is the baseline model."
     else:
         delta_text = (
-            "Delta vs baseline\n"
             f"Test Acc: {metrics['test_acc'] - baseline_metrics['test_acc']:+.4f}\n"
             f"Precision: {metrics['precision'] - baseline_metrics['precision']:+.4f}\n"
             f"Recall: {metrics['recall'] - baseline_metrics['recall']:+.4f}\n"
@@ -1132,15 +1130,19 @@ def visualize_baseline_tree() -> None:
     if imp1_path.exists():
         imp1_model = load_model(imp1_path)
         imp1_cv_text = "Cross-validation\nCV Mean F1: n/a\nCV Mean ROC-AUC: n/a"
+        imp1_tab_name = "max_depth=5"
         if imp1_summary and "improved" in imp1_summary:
             imp1_cv_text = (
                 "Cross-validation\n"
                 f"CV Mean F1: {imp1_summary['improved'].get('cv_mean_f1', float('nan')):.4f}\n"
                 f"CV Mean ROC-AUC: {imp1_summary['improved'].get('cv_mean_roc_auc', float('nan')):.4f}"
             )
+        if imp1_summary and "best_params" in imp1_summary:
+            best_depth = imp1_summary["best_params"].get("max_depth")
+            imp1_tab_name = f"max_depth={best_depth}"
         scenarios.append(
             _scenario_payload(
-                "max_depth=5",
+                imp1_tab_name,
                 imp1_model,
                 X_train,
                 y_train,
