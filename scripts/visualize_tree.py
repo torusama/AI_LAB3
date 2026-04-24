@@ -1718,8 +1718,9 @@ def visualize_baseline_tree() -> None:
 
     scenarios = [
         baseline_scenario,
-        _scenario_payload("Pruned", pruned, X_train, y_train, X_test, y_test, baseline_metrics, cv_text=imp3_cv_text),
     ]
+
+    pruned_scenario = _scenario_payload("Pruned", pruned, X_train, y_train, X_test, y_test, baseline_metrics, cv_text=imp3_cv_text)
 
     imp1_path = MODEL_DIR / "improvement1_depth_tuned.joblib"
     if imp1_path.exists():
@@ -1803,6 +1804,8 @@ def visualize_baseline_tree() -> None:
                 cv_text=balanced_cv_text,
             )
         )
+
+    scenarios.append(pruned_scenario)
 
     root = tk.Tk()
     TreeExplorerApp(root, scenarios)
