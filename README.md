@@ -6,6 +6,7 @@
   <img src="https://drive.google.com/uc?export=view&id=1nH0jzzAKsaC5BB3dRa09hC4Tss8MPVnE" alt="Image 3" width="45%" />
   <img src="https://drive.google.com/uc?export=view&id=16k3HfcEHoFjlbEJQWXQOfpkHpv7qvH8j" alt="Image 4" width="45%" />
 </p>
+
 # Lab 3 — Decision Tree Modeling and Improvement
 **Course:** Introduction to Artificial Intelligence — 24C08
 
