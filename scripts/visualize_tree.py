@@ -613,6 +613,21 @@ class TreeExplorerApp:
         self.placeholder_counter = 0
         self.selected_item_id: str | None = None
 
+        # ── Per-algorithm state cache ────────────────────────────────────────
+        # Keyed by scenario name (unique identifier).  Each entry is a dict:
+        #   {
+        #     "visible_items":      dict[str, VisibleItem],
+        #     "visible_children":   dict[str, list[str]],
+        #     "root_item_id":       str | None,
+        #     "placeholder_counter": int,
+        #     "selected_item_id":   str | None,
+        #     "scale_factor":       float,
+        #   }
+        # The cache is populated lazily the first time a scenario is visited,
+        # and is written back before switching away from a tab, so state
+        # (expanded nodes, selected node, zoom level) survives tab navigation.
+        self._algo_state_cache: dict[str, dict] = {}
+
         self.algo_buttons: list[tk.Button] = []
         self.detail_vars: dict[str, tk.StringVar] = {}
         self.metric_vars: dict[str, tk.StringVar] = {}
@@ -1067,6 +1082,12 @@ class TreeExplorerApp:
         if hasattr(self, 'stats_frame') and self.stats_frame.winfo_ismapped():
             self._hide_stats()
 
+        # ── Persist the outgoing tab's tree-view state ───────────────────────
+        # Guard: root_item_id is None before the very first _switch_scenario call.
+        if self.root_item_id is not None:
+            outgoing_name = self.scenarios[self.current_index].name
+            self._save_tree_state(outgoing_name)
+
         self.current_index = idx
         for i, btn in enumerate(self.algo_buttons):
             if i == idx:
@@ -1235,8 +1256,18 @@ class TreeExplorerApp:
         else:
             self.fit_badge.configure(text="Fit is balanced", bg="#d7f0dc", fg="#1f6b2d")
 
-        self._reset_visible_tree()
-        self._show_node_details(0)
+        # ── Restore cached tree state, or build fresh if first visit ─────────
+        if not self._restore_tree_state(scenario.name):
+            # First time visiting this tab — initialise from scratch.
+            self._reset_visible_tree()
+
+        # Show details for the currently selected node (root as fallback).
+        node_to_show = 0
+        if self.selected_item_id and self.selected_item_id in self.visible_items:
+            item = self.visible_items[self.selected_item_id]
+            if item.kind == "node" and item.node_id is not None:
+                node_to_show = item.node_id
+        self._show_node_details(node_to_show)
         self._draw_tree_graph()
 
     def _render_readable_rules(self, scenario: "ScenarioData") -> None:
@@ -1345,6 +1376,39 @@ class TreeExplorerApp:
                              ).pack(fill="x", pady=1)
             else:
                 tk.Frame(card, bg="#ffffff", height=6).pack()
+
+    # ── State-cache helpers ──────────────────────────────────────────────────
+
+    def _save_tree_state(self, scenario_name: str) -> None:
+        """Snapshot the current tree-view state into the per-algorithm cache."""
+        import copy
+        self._algo_state_cache[scenario_name] = {
+            "visible_items":       copy.deepcopy(self.visible_items),
+            "visible_children":    copy.deepcopy(self.visible_children),
+            "root_item_id":        self.root_item_id,
+            "placeholder_counter": self.placeholder_counter,
+            "selected_item_id":    self.selected_item_id,
+            "scale_factor":        self.scale_factor,
+        }
+
+    def _restore_tree_state(self, scenario_name: str) -> bool:
+        """Restore the tree-view state from the cache.
+
+        Returns True when a cached snapshot was found and loaded, False when
+        the scenario is being visited for the first time (caller should then
+        call _reset_visible_tree to build the initial state).
+        """
+        cached = self._algo_state_cache.get(scenario_name)
+        if cached is None:
+            return False
+        import copy
+        self.visible_items       = copy.deepcopy(cached["visible_items"])
+        self.visible_children    = copy.deepcopy(cached["visible_children"])
+        self.root_item_id        = cached["root_item_id"]
+        self.placeholder_counter = cached["placeholder_counter"]
+        self.selected_item_id    = cached["selected_item_id"]
+        self.scale_factor        = cached["scale_factor"]
+        return True
 
     def _reset_visible_tree(self) -> None:
         self.visible_items.clear()
