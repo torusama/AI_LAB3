@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,19 @@ ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
 MODEL_DIR = ARTIFACT_DIR / "models"
 REPORT_DIR = ARTIFACT_DIR / "reports"
 FIGURE_DIR = ARTIFACT_DIR / "figures"
+
+
+def configure_console_encoding() -> None:
+    # Avoid UnicodeEncodeError on Windows terminals when the project path contains
+    # non-ASCII characters such as Vietnamese folder names.
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
 
 
 def ensure_directories() -> None:
@@ -58,3 +72,6 @@ def load_model(model_path: Path):
 
 def get_default_model_path() -> Path:
     return MODEL_DIR / "baseline_decision_tree.joblib"
+
+
+configure_console_encoding()
