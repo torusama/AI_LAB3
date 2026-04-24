@@ -1,8 +1,7 @@
 <p align="center">
-  <img src="https://drive.google.com/file/d/1xj-RD3bsIaZr59FddJsGqaoTeAQI5u53/view?usp=sharing" alt="Image 1" width="45%" />
-  <img src="https://drive.google.com/file/d/1Axkz54BBeZ_BblH9EMBVN-6oZG6301JN/view?usp=drive_link" alt="Image 2" width="45%" />
+  <img src="https://drive.google.com/uc?export=view&id=1xj-RD3bsIaZr59FddJsGqaoTeAQI5u53" alt="Image 1" width="45%" />
+  <img src="https://drive.google.com/uc?export=view&id=1Axkz54BBeZ_BblH9EMBVN-6oZG6301JN" alt="Image 2" width="45%" />
 </p>
-
 # Lab 3 — Decision Tree Modeling and Improvement
 **Course:** Introduction to Artificial Intelligence — 24C08
 
