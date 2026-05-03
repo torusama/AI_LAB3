@@ -126,3 +126,7 @@ python scripts/run_all.py
 | Improvement 2 report | `artifacts/reports/improvement2_summary.json`, `improvement2_metrics_comparison.csv` |
 | Improvement 3 report | `artifacts/reports/improvement3_summary.json`, `improvement3_metrics_comparison.csv` |
 | Interactive UI | Opens in a desktop window — `python scripts/visualize_tree.py` |
+
+## Demo
+
+[\[Video\]](https://youtu.be/zwMlMtflxns)
